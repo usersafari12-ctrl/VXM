@@ -1,24 +1,17 @@
 /**
- * Voxiom Bot Proxy Server
- * Deploy on Render (free tier) as a Web Service
- * Runtime: Node.js  Start command: node server.js
+ * Voxiom Bot Manager — Server
+ * Deploy on Render. Start command: node server.js
  *
- * Environment variables to set in Render dashboard:
- *   FIREBASE_PROJECT_ID   — e.g. dm-me-if-you-find-this
- *   FIREBASE_CLIENT_EMAIL — from Firebase service account JSON
- *   FIREBASE_PRIVATE_KEY  — from Firebase service account JSON (include \n chars)
- *   ADMIN_SECRET          — any strong password, used by admin.html
- *   PORT                  — set automatically by Render, don't override
+ * Env vars needed:
+ *   FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, ADMIN_SECRET
  */
 
 'use strict';
 
-const http        = require('http');
-const { WebSocketServer, WebSocket } = require('ws');
-const admin       = require('firebase-admin');
-const crypto      = require('crypto');
+const http   = require('http');
+const admin  = require('firebase-admin');
+const crypto = require('crypto');
 
-// ── Firebase Admin init ───────────────────────────────────────────
 admin.initializeApp({
     credential: admin.credential.cert({
         projectId:   process.env.FIREBASE_PROJECT_ID,
@@ -28,82 +21,182 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// ── HTTP server (required by Render to keep the service alive) ────
-const httpServer = http.createServer((req, res) => {
+// ── XOR ───────────────────────────────────────────────────────────
+function xorEncrypt(text, key) {
+    const tb = Buffer.from(text, 'utf8');
+    const kb = Buffer.from(key,  'utf8');
+    const out = Buffer.alloc(tb.length);
+    for (let i = 0; i < tb.length; i++) out[i] = tb[i] ^ kb[i % kb.length];
+    return out.toString('base64');
+}
+
+// ── Bot payload (runs in browser on voxiom.io after decryption) ───
+const BOT_PAYLOAD = `(function(){
+var HANDSHAKE=new Uint8Array([0x03,0x87,0x03,0x02,0x05]);
+var HEARTBEAT_MS=2500,TICK_MS=50,JUMP_EVERY=60,PLACE_AFTER=8;
+var bots={},botIdCounter=0,totalDeployed=0,cycleEnabled=false;
+function updateStats(){var v=Object.values(bots),el;
+  el=document.getElementById('vbm-active');if(el)el.textContent=v.filter(function(b){return b.alive;}).length;
+  el=document.getElementById('vbm-total'); if(el)el.textContent=totalDeployed;
+  el=document.getElementById('vbm-dead');  if(el)el.textContent=v.filter(function(b){return !b.alive;}).length;
+  el=document.getElementById('vbm-kill');  if(el)el.disabled=v.length===0;}
+function log(msg,type){var el=document.getElementById('vbm-log');if(!el)return;
+  var line=document.createElement('div');line.className='vbm-li '+(type||'info');
+  line.textContent='['+new Date().toTimeString().slice(0,8)+'] '+msg;
+  el.appendChild(line);el.scrollTop=el.scrollHeight;
+  while(el.children.length>150)el.removeChild(el.firstChild);}
+function createCard(id){var grid=document.getElementById('vbm-bot-grid');
+  var empty=grid.querySelector('.vbm-empty');if(empty)empty.remove();
+  var card=document.createElement('div');card.className='vbm-bot connecting';card.id='vbm-b-'+id;
+  card.innerHTML='<span class="vbm-bot-id">#'+String(id).padStart(2,'0')+'</span>'+
+    '<span class="vbm-bot-st" id="vbm-bs-'+id+'">CONN</span>'+
+    '<span class="vbm-bot-cd" id="vbm-cd-'+id+'"></span>';
+  card.addEventListener('click',function(){killBot(id);});grid.appendChild(card);}
+function setCardState(id,s,cls){var c=document.getElementById('vbm-b-'+id),st=document.getElementById('vbm-bs-'+id);
+  if(!c)return;c.className='vbm-bot '+(cls||'');if(st)st.textContent=s;}
+function removeCard(id){var c=document.getElementById('vbm-b-'+id);if(c)c.remove();
+  var g=document.getElementById('vbm-bot-grid');
+  if(!g.children.length)g.innerHTML='<div class="vbm-empty">NO BOTS DEPLOYED</div>';}
+function buildPacket(bot,opts){opts=opts||{};var isSlot=opts.slot!==undefined;
+  var buf=new ArrayBuffer(isSlot?22:21),dv=new DataView(buf),u8=new Uint8Array(buf);
+  dv.setUint8(0,(bot.seq/0x100000000)>>>0&0xFF);dv.setUint8(1,(bot.seq>>>24)&0xFF);
+  dv.setUint8(2,(bot.seq>>>16)&0xFF);dv.setUint8(3,(bot.seq>>>8)&0xFF);dv.setUint8(4,(bot.seq>>>0)&0xFF);
+  u8[5]=0;u8[6]=0;u8[7]=0;u8[8]=0;
+  u8[9]=0xbf;u8[10]=0xc9;u8[11]=0x0f;u8[12]=0xdb;
+  dv.setFloat32(13,bot.yaw,false);u8[17]=0x7f;u8[18]=0x7f;
+  if(isSlot){u8[19]=0x01;u8[20]=0x00;u8[21]=opts.slot&0xFF;}
+  else if(opts.jump){u8[19]=0x02;u8[20]=0x03;}
+  else if(opts.place){u8[19]=0x00;u8[20]=0x00;}
+  else{u8[19]=0x00;u8[20]=0x03;}
+  bot.seq++;return buf;}
+function createBot(id,url,timerSecs){
+  var bot={id:id,ws:null,alive:false,seq:0,yaw:Math.random()*Math.PI*2,ht:null,tt:null,killTimer:null,timerStarted:false};
+  try{bot.ws=new WebSocket(url);bot.ws.binaryType='arraybuffer';}
+  catch(e){log('Bot #'+id+' WS error: '+e.message,'error');setCardState(id,'ERR','dead');return bot;}
+  bot.ws.onopen=function(){bot.alive=true;bot.seq=0;bot.ws.send(HANDSHAKE.buffer);
+    setCardState(id,'LIVE','');log('Bot #'+String(id).padStart(2,'0')+' connected','success');
+    bot.ht=setInterval(function(){if(bot.ws&&bot.ws.readyState===1)bot.ws.send(new Uint8Array([0x06]).buffer);},HEARTBEAT_MS);
+    setTimeout(function(){var tc=0;bot.tt=setInterval(function(){
+      if(!bot.ws||bot.ws.readyState!==1)return;
+      bot.yaw+=0.008;if(bot.yaw>Math.PI*2)bot.yaw-=Math.PI*2;tc++;
+      var p=tc%JUMP_EVERY;
+      if(p===1)bot.ws.send(buildPacket(bot,{jump:true}));
+      else if(p===PLACE_AFTER)bot.ws.send(buildPacket(bot,{place:true}));
+      else bot.ws.send(buildPacket(bot));},TICK_MS);},600);updateStats();};
+  bot.ws.onmessage=function(e){if(!(e.data instanceof ArrayBuffer))return;
+    if(bot.timerStarted)return;bot.timerStarted=true;
+    bot.ws.send(buildPacket(bot,{slot:3}));
+    var s=Math.max(5,timerSecs||35);
+    log('Bot #'+String(id).padStart(2,'00')+' fully joined \u2014 '+s+'s timer','success');
+    var cdEl=function(){return document.getElementById('vbm-cd-'+id);};
+    if(cdEl())cdEl().textContent=s+'s';
+    bot.killTimer=setInterval(function(){s--;var el=cdEl();
+      if(el)el.textContent=s>0?s+'s':'BYE';
+      if(s<=0){clearInterval(bot.killTimer);killBot(id);}},1000);};
+  bot.ws.onerror=function(){log('Bot #'+String(id).padStart(2,'0')+' socket error','error');};
+  bot.ws.onclose=function(e){bot.alive=false;clearInterval(bot.ht);clearInterval(bot.tt);
+    setCardState(id,'DEAD','dead');log('Bot #'+String(id).padStart(2,'0')+' closed ('+e.code+')','warn');updateStats();};
+  bot.kill=function(){clearInterval(bot.ht);clearInterval(bot.tt);clearInterval(bot.killTimer);if(bot.ws)bot.ws.close();bot.alive=false;};
+  return bot;}
+function deployBot(url,timerSecs){var id=++botIdCounter;totalDeployed++;createCard(id);bots[id]=createBot(id,url,timerSecs);updateStats();}
+function killBot(id){if(!bots[id])return;bots[id].kill();log('Bot #'+String(id).padStart(2,'0')+' left','warn');
+  delete bots[id];removeCard(id);updateStats();
+  if(cycleEnabled){var url=document.getElementById('vbm-url').value.trim();
+    var secs=Math.max(5,parseInt(document.getElementById('vbm-timer').value)||35);
+    if(url.startsWith('wss://')){log('Cycle: redeploying...','info');setTimeout(function(){deployBot(url,secs);},500);}}}
+document.getElementById('vbm-deploy').addEventListener('click',function(){
+  var url=document.getElementById('vbm-url').value.trim();
+  var count=Math.max(1,Math.min(50,parseInt(document.getElementById('vbm-count').value)||1));
+  var secs=Math.max(5,parseInt(document.getElementById('vbm-timer').value)||35);
+  if(!url.startsWith('wss://')){log('URL must start with wss://','error');return;}
+  log('Deploying '+count+' bot(s)','info');
+  for(var i=0;i<count;i++){(function(d){setTimeout(function(){deployBot(url,secs);},d);})(i*250);}});
+document.getElementById('vbm-kill').addEventListener('click',function(){
+  var ids=Object.keys(bots);if(!ids.length)return;
+  log('Force killing all '+ids.length+' bot(s)','error');
+  ids.forEach(function(id){bots[id].kill();removeCard(id);delete bots[id];});updateStats();});
+document.getElementById('vbm-cycle').addEventListener('change',function(){
+  cycleEnabled=this.checked;document.getElementById('vbm-cycle-ind').textContent=cycleEnabled?'●':'';
+  log(cycleEnabled?'Cycle ON':'Cycle OFF',cycleEnabled?'success':'warn');});
+log('Bot engine active.','success');updateStats();
+})();`;
+
+// ── HTTP server ───────────────────────────────────────────────────
+const httpServer = http.createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, x-id-token, x-license-key');
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
     if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200); res.end('OK');
-        return;
+        res.writeHead(200); res.end('OK'); return;
     }
 
-    // ── Admin API (used by admin.html) ──────────────────────────
     if (req.url.startsWith('/admin/')) {
-        handleAdminHttp(req, res);
+        handleAdminHttp(req, res); return;
+    }
+
+    // ── GET /payload — validate auth, return XOR-encrypted bot JS ─
+    if (req.method === 'GET' && req.url === '/payload') {
+        const idToken    = req.headers['x-id-token'];
+        const licenseKey = req.headers['x-license-key'];
+        if (!idToken || !licenseKey) {
+            res.writeHead(401); res.end(JSON.stringify({ error: 'Missing credentials.' })); return;
+        }
+        try {
+            const decoded   = await admin.auth().verifyIdToken(idToken);
+            const userEmail = decoded.email.toLowerCase();
+            const keyDoc    = await db.collection('licenseKeys').doc(licenseKey).get();
+            if (!keyDoc.exists)                         { res.writeHead(403); res.end(JSON.stringify({ error: 'Invalid license key.' }));             return; }
+            if (!keyDoc.data().active)                  { res.writeHead(403); res.end(JSON.stringify({ error: 'License key revoked.' }));             return; }
+            if (keyDoc.data().email !== userEmail)      { res.writeHead(403); res.end(JSON.stringify({ error: 'Key not assigned to this account.' })); return; }
+            const encrypted = xorEncrypt(BOT_PAYLOAD, licenseKey);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ payload: encrypted }));
+            console.log(`[Payload] served to ${userEmail}`);
+        } catch (e) {
+            console.error('[Payload error]', e.message);
+            res.writeHead(401); res.end(JSON.stringify({ error: 'Authentication failed.' }));
+        }
         return;
     }
 
     res.writeHead(404); res.end('Not found');
 });
 
-// ── Admin HTTP endpoints ──────────────────────────────────────────
+// ── Admin endpoints ───────────────────────────────────────────────
 async function handleAdminHttp(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-
-    const secret = req.headers['x-admin-secret'];
-    if (secret !== process.env.ADMIN_SECRET) {
+    if (req.headers['x-admin-secret'] !== process.env.ADMIN_SECRET) {
         res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return;
     }
-
     let body = '';
     req.on('data', c => body += c);
     await new Promise(r => req.on('end', r));
-
     try {
         const path = req.url;
-
-        // GET /admin/keys — list all keys
         if (req.method === 'GET' && path === '/admin/keys') {
             const snap = await db.collection('licenseKeys').get();
-            const keys = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(keys));
-            return;
+            res.end(JSON.stringify(snap.docs.map(d => ({ id: d.id, ...d.data() })))); return;
         }
-
-        // POST /admin/keys — create a key
         if (req.method === 'POST' && path === '/admin/keys') {
             const { email, note } = JSON.parse(body);
             if (!email) { res.writeHead(400); res.end(JSON.stringify({ error: 'email required' })); return; }
             const key = 'VBM-' + crypto.randomBytes(10).toString('hex').toUpperCase();
             await db.collection('licenseKeys').doc(key).set({
-                email:     email.toLowerCase(),
-                note:      note || '',
-                active:    true,
-                sessions:  [],
+                email: email.toLowerCase(), note: note || '', active: true,
                 createdAt: admin.firestore.FieldValue.serverTimestamp()
             });
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ key }));
-            return;
+            res.end(JSON.stringify({ key })); return;
         }
-
-        // DELETE /admin/keys/:key — revoke a key
         if (req.method === 'DELETE' && path.startsWith('/admin/keys/')) {
-            const key = path.split('/')[3];
-            await db.collection('licenseKeys').doc(key).update({ active: false });
-            res.writeHead(200); res.end(JSON.stringify({ ok: true }));
-            return;
+            await db.collection('licenseKeys').doc(path.split('/')[3]).update({ active: false });
+            res.writeHead(200); res.end(JSON.stringify({ ok: true })); return;
         }
-
-        // PATCH /admin/keys/:key/restore — re-activate
         if (req.method === 'PATCH' && path.endsWith('/restore')) {
-            const key = path.split('/')[3];
-            await db.collection('licenseKeys').doc(key).update({ active: true });
-            res.writeHead(200); res.end(JSON.stringify({ ok: true }));
-            return;
+            await db.collection('licenseKeys').doc(path.split('/')[3]).update({ active: true });
+            res.writeHead(200); res.end(JSON.stringify({ ok: true })); return;
         }
-
         res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' }));
     } catch (e) {
         console.error('[Admin]', e);
@@ -111,253 +204,5 @@ async function handleAdminHttp(req, res) {
     }
 }
 
-// ── Session tracking (in-memory, per key) ────────────────────────
-// sessionMap: licenseKey → Set of sessionIds
-const sessionMap = new Map();
-const MAX_SESSIONS = 2;
-
-function addSession(licenseKey, sessionId) {
-    if (!sessionMap.has(licenseKey)) sessionMap.set(licenseKey, new Set());
-    sessionMap.get(licenseKey).add(sessionId);
-}
-function removeSession(licenseKey, sessionId) {
-    if (sessionMap.has(licenseKey)) sessionMap.get(licenseKey).delete(sessionId);
-}
-function sessionCount(licenseKey) {
-    return sessionMap.has(licenseKey) ? sessionMap.get(licenseKey).size : 0;
-}
-
-// ── WebSocket server (client connects here) ───────────────────────
-const wss = new WebSocketServer({ server: httpServer });
-
-wss.on('connection', (clientWs) => {
-    let authed      = false;
-    let licenseKey  = null;
-    let sessionId   = crypto.randomBytes(8).toString('hex');
-    let bots        = {};   // botId → { ws, intervals[] }
-    let botIdSeq    = 0;
-
-    function send(obj) {
-        if (clientWs.readyState === WebSocket.OPEN)
-            clientWs.send(JSON.stringify(obj));
-    }
-
-    function cleanup() {
-        // Kill all bots for this session
-        for (const id of Object.keys(bots)) destroyBot(id, false);
-        if (licenseKey) removeSession(licenseKey, sessionId);
-        console.log(`[Session ${sessionId}] disconnected`);
-    }
-
-    clientWs.on('close', cleanup);
-    clientWs.on('error', cleanup);
-
-    clientWs.on('message', async (raw) => {
-        let msg;
-        try { msg = JSON.parse(raw); } catch { return; }
-
-        // ── AUTH message ─────────────────────────────────────────
-        if (msg.type === 'AUTH') {
-            try {
-                // 1. Verify Firebase ID token
-                const decoded = await admin.auth().verifyIdToken(msg.idToken);
-                const userEmail = decoded.email.toLowerCase();
-
-                // 2. Validate license key
-                const keyDoc = await db.collection('licenseKeys').doc(msg.licenseKey).get();
-                if (!keyDoc.exists) { send({ type: 'AUTH_FAIL', reason: 'Invalid license key.' }); clientWs.close(); return; }
-                const keyData = keyDoc.data();
-                if (!keyData.active)                          { send({ type: 'AUTH_FAIL', reason: 'License key revoked.' });       clientWs.close(); return; }
-                if (keyData.email !== userEmail)              { send({ type: 'AUTH_FAIL', reason: 'Key not assigned to this account.' }); clientWs.close(); return; }
-                if (sessionCount(msg.licenseKey) >= MAX_SESSIONS) { send({ type: 'AUTH_FAIL', reason: 'Max sessions reached (2).' }); clientWs.close(); return; }
-
-                // 3. All good
-                authed     = true;
-                licenseKey = msg.licenseKey;
-                addSession(licenseKey, sessionId);
-                send({ type: 'AUTH_OK', sessionId });
-                console.log(`[Session ${sessionId}] authed — ${userEmail} / ${licenseKey}`);
-            } catch (e) {
-                console.error('[Auth error]', e.message);
-                send({ type: 'AUTH_FAIL', reason: 'Authentication failed.' });
-                clientWs.close();
-            }
-            return;
-        }
-
-        if (!authed) { send({ type: 'ERROR', reason: 'Not authenticated.' }); return; }
-
-        // ── DEPLOY message ───────────────────────────────────────
-        if (msg.type === 'DEPLOY') {
-            const { gameUrl, count, timerSecs } = msg;
-            if (!gameUrl || !gameUrl.startsWith('wss://')) {
-                send({ type: 'ERROR', reason: 'Invalid game URL.' }); return;
-            }
-            const n = Math.max(1, Math.min(50, count || 1));
-            for (let i = 0; i < n; i++) {
-                setTimeout(() => {
-                    const id = ++botIdSeq;
-                    spawnBot(id, gameUrl, timerSecs || 35);
-                }, i * 250);
-            }
-            return;
-        }
-
-        // ── KILL message ─────────────────────────────────────────
-        if (msg.type === 'KILL') {
-            if (msg.botId === 'ALL') {
-                for (const id of Object.keys(bots)) destroyBot(id, true);
-            } else {
-                destroyBot(msg.botId, true);
-            }
-            return;
-        }
-    });
-
-    // ── Bot logic (lives entirely on the server) ─────────────────
-    const HANDSHAKE    = Buffer.from([0x03, 0x87, 0x03, 0x02, 0x05]);
-    const HEARTBEAT_MS = 2500;
-    const TICK_MS      = 50;
-    const JUMP_EVERY   = 60;
-    const PLACE_AFTER  = 8;
-
-    function buildPacket(bot, opts) {
-        opts = opts || {};
-        const isSlot = opts.slot !== undefined;
-        const buf = Buffer.alloc(isSlot ? 22 : 21);
-        // Sequence (5-byte big-endian)
-        buf[0] = (bot.seq / 0x100000000) >>> 0 & 0xFF;
-        buf[1] = (bot.seq >>> 24) & 0xFF;
-        buf[2] = (bot.seq >>> 16) & 0xFF;
-        buf[3] = (bot.seq >>>  8) & 0xFF;
-        buf[4] = (bot.seq >>>  0) & 0xFF;
-        buf[5]=0; buf[6]=0; buf[7]=0; buf[8]=0;
-        // Pitch: looking down (bf c9 0f db)
-        buf[9]=0xbf; buf[10]=0xc9; buf[11]=0x0f; buf[12]=0xdb;
-        // Yaw
-        buf.writeFloatBE(bot.yaw, 13);
-        buf[17] = 0x7f; buf[18] = 0x7f;
-        if (isSlot)        { buf[19]=0x01; buf[20]=0x00; buf[21]=opts.slot & 0xFF; }
-        else if (opts.jump)  { buf[19]=0x02; buf[20]=0x03; }
-        else if (opts.place) { buf[19]=0x00; buf[20]=0x00; }
-        else                 { buf[19]=0x00; buf[20]=0x03; }
-        bot.seq++;
-        return buf;
-    }
-
-    function spawnBot(id, gameUrl, timerSecs) {
-        const bot = { id, seq: 0, yaw: Math.random() * Math.PI * 2, alive: false, timerStarted: false };
-        const intervals = [];
-        bots[id] = { bot, intervals, ws: null };
-
-        send({ type: 'BOT_STATUS', botId: id, status: 'CONN', cls: 'connecting' });
-
-        let gameWs;
-        try {
-            gameWs = new WebSocket(gameUrl, {
-                headers: {
-                    'Host':                  new URL(gameUrl.replace('wss://','https://')).host,
-                    'Origin':                'https://voxiom.io',
-                    'User-Agent':            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Pragma':                'no-cache',
-                    'Cache-Control':         'no-cache',
-                    'Upgrade':               'websocket',
-                    'Connection':            'Upgrade',
-                    'Sec-WebSocket-Version': '13',
-                    'Accept-Encoding':       'gzip, deflate, br',
-                    'Accept-Language':       'en-US,en;q=0.9'
-                }
-            });
-            bots[id].ws = gameWs;
-        } catch (e) {
-            send({ type: 'BOT_STATUS', botId: id, status: 'ERR', cls: 'dead' });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} WS error: ${e.message}`, level: 'error' });
-            return;
-        }
-
-        gameWs.on('open', () => {
-            bot.alive = true;
-            bot.seq   = 0;
-            gameWs.send(HANDSHAKE);
-            send({ type: 'BOT_STATUS', botId: id, status: 'LIVE', cls: '' });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} connected`, level: 'success' });
-            send({ type: 'BOT_ALIVE', botId: id, alive: true });
-
-            // Heartbeat
-            const ht = setInterval(() => {
-                if (gameWs.readyState === WebSocket.OPEN) gameWs.send(Buffer.from([0x06]));
-            }, HEARTBEAT_MS);
-            intervals.push(ht);
-
-            // Tick
-            let tickCycle = 0;
-            const tt = setInterval(() => {
-                if (gameWs.readyState !== WebSocket.OPEN) return;
-                bot.yaw += 0.008;
-                if (bot.yaw > Math.PI * 2) bot.yaw -= Math.PI * 2;
-                tickCycle++;
-                const phase = tickCycle % JUMP_EVERY;
-                if      (phase === 1)          gameWs.send(buildPacket(bot, { jump: true }));
-                else if (phase === PLACE_AFTER) gameWs.send(buildPacket(bot, { place: true }));
-                else                            gameWs.send(buildPacket(bot));
-            }, TICK_MS);
-            setTimeout(() => intervals.push(tt), 600);
-        });
-
-        gameWs.on('message', (data) => {
-            if (!Buffer.isBuffer(data) && !(data instanceof ArrayBuffer)) return;
-            if (bot.timerStarted) return;
-            bot.timerStarted = true;
-
-            // Switch to slot 4
-            gameWs.send(buildPacket(bot, { slot: 3 }));
-
-            let secsLeft = Math.max(5, timerSecs);
-            send({ type: 'BOT_TIMER', botId: id, secs: secsLeft });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} fully joined — ${secsLeft}s timer`, level: 'success' });
-
-            const kt = setInterval(() => {
-                secsLeft--;
-                send({ type: 'BOT_TIMER', botId: id, secs: secsLeft });
-                if (secsLeft <= 0) {
-                    clearInterval(kt);
-                    destroyBot(id, true);
-                }
-            }, 1000);
-            intervals.push(kt);
-        });
-
-        gameWs.on('error', () => {
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} socket error`, level: 'error' });
-        });
-
-        gameWs.on('close', (code, reason) => {
-            bot.alive = false;
-            intervals.forEach(clearInterval);
-            const reasonStr = reason ? reason.toString() : '';
-            console.log(`[Bot #${id}] closed — code=${code} reason=${reasonStr}`);
-            send({ type: 'BOT_STATUS', botId: id, status: 'DEAD', cls: 'dead' });
-            send({ type: 'BOT_ALIVE',  botId: id, alive: false });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} closed (${code}${reasonStr ? ' — ' + reasonStr : ''})`, level: 'warn' });
-            delete bots[id];
-            send({ type: 'STATS_UPDATE' });
-        });
-    }
-
-    function destroyBot(id, notify) {
-        if (!bots[id]) return;
-        const { bot, intervals, ws } = bots[id];
-        intervals.forEach(clearInterval);
-        if (ws) try { ws.close(); } catch {}
-        bot.alive = false;
-        delete bots[id];
-        if (notify) {
-            send({ type: 'BOT_REMOVED', botId: id });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} killed`, level: 'warn' });
-        }
-        send({ type: 'STATS_UPDATE' });
-    }
-});
-
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => console.log(`[VBM Proxy] listening on :${PORT}`));
+httpServer.listen(PORT, () => console.log(`[VBM] listening on :${PORT}`));
