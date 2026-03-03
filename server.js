@@ -1,4 +1,15 @@
-
+/**
+ * Voxiom Bot Proxy Server
+ * Deploy on Render (free tier) as a Web Service
+ * Runtime: Node.js  Start command: node server.js
+ *
+ * Environment variables to set in Render dashboard:
+ *   FIREBASE_PROJECT_ID   — e.g. dm-me-if-you-find-this
+ *   FIREBASE_CLIENT_EMAIL — from Firebase service account JSON
+ *   FIREBASE_PRIVATE_KEY  — from Firebase service account JSON (include \n chars)
+ *   ADMIN_SECRET          — any strong password, used by admin.html
+ *   PORT                  — set automatically by Render, don't override
+ */
 
 'use strict';
 
@@ -243,7 +254,20 @@ wss.on('connection', (clientWs) => {
 
         let gameWs;
         try {
-            gameWs = new WebSocket(gameUrl);
+            gameWs = new WebSocket(gameUrl, {
+                headers: {
+                    'Host':                  new URL(gameUrl.replace('wss://','https://')).host,
+                    'Origin':                'https://voxiom.io',
+                    'User-Agent':            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Pragma':                'no-cache',
+                    'Cache-Control':         'no-cache',
+                    'Upgrade':               'websocket',
+                    'Connection':            'Upgrade',
+                    'Sec-WebSocket-Version': '13',
+                    'Accept-Encoding':       'gzip, deflate, br',
+                    'Accept-Language':       'en-US,en;q=0.9'
+                }
+            });
             bots[id].ws = gameWs;
         } catch (e) {
             send({ type: 'BOT_STATUS', botId: id, status: 'ERR', cls: 'dead' });
@@ -307,12 +331,14 @@ wss.on('connection', (clientWs) => {
             send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} socket error`, level: 'error' });
         });
 
-        gameWs.on('close', (code) => {
+        gameWs.on('close', (code, reason) => {
             bot.alive = false;
             intervals.forEach(clearInterval);
+            const reasonStr = reason ? reason.toString() : '';
+            console.log(`[Bot #${id}] closed — code=${code} reason=${reasonStr}`);
             send({ type: 'BOT_STATUS', botId: id, status: 'DEAD', cls: 'dead' });
             send({ type: 'BOT_ALIVE',  botId: id, alive: false });
-            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} closed (${code})`, level: 'warn' });
+            send({ type: 'LOG', msg: `Bot #${String(id).padStart(2,'0')} closed (${code}${reasonStr ? ' — ' + reasonStr : ''})`, level: 'warn' });
             delete bots[id];
             send({ type: 'STATS_UPDATE' });
         });
