@@ -6,11 +6,14 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 app.use(express.json());
 app.use(cors({
-  origin: process.env.ADMIN_ORIGIN || '*',
+  origin: '*',
   credentials: true
 }));
 
-// ─── In-memory DB (replace with MongoDB/PostgreSQL in production) ─────────────
+// ─── Admin Panel HTML (served at /) ──────────────────────────────────────────
+const ADMIN_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>LicenseForge \u2014 Admin</title>\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link href=\"https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap\" rel=\"stylesheet\">\n<style>\n  :root {\n    --bg: #0a0a0f;\n    --surface: #111118;\n    --surface2: #18181f;\n    --border: #2a2a38;\n    --accent: #7c3aed;\n    --accent2: #06b6d4;\n    --accent3: #f59e0b;\n    --danger: #ef4444;\n    --success: #10b981;\n    --text: #e2e8f0;\n    --muted: #64748b;\n    --mono: 'Space Mono', monospace;\n    --sans: 'Syne', sans-serif;\n  }\n\n  * { margin: 0; padding: 0; box-sizing: border-box; }\n\n  body {\n    background: var(--bg);\n    color: var(--text);\n    font-family: var(--sans);\n    min-height: 100vh;\n    overflow-x: hidden;\n  }\n\n  /* Grid background */\n  body::before {\n    content: '';\n    position: fixed;\n    inset: 0;\n    background-image:\n      linear-gradient(rgba(124,58,237,0.03) 1px, transparent 1px),\n      linear-gradient(90deg, rgba(124,58,237,0.03) 1px, transparent 1px);\n    background-size: 40px 40px;\n    pointer-events: none;\n    z-index: 0;\n  }\n\n  /* \u2500\u2500\u2500 Login Screen \u2500\u2500\u2500 */\n  #login-screen {\n    position: fixed;\n    inset: 0;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    z-index: 100;\n    background: var(--bg);\n  }\n\n  .login-box {\n    background: var(--surface);\n    border: 1px solid var(--border);\n    border-top: 2px solid var(--accent);\n    padding: 48px;\n    width: 420px;\n    position: relative;\n  }\n\n  .login-box::before {\n    content: '';\n    position: absolute;\n    top: -2px; left: -1px; right: -1px;\n    height: 2px;\n    background: linear-gradient(90deg, var(--accent), var(--accent2));\n  }\n\n  .login-logo {\n    font-family: var(--sans);\n    font-size: 28px;\n    font-weight: 800;\n    letter-spacing: -1px;\n    margin-bottom: 8px;\n    background: linear-gradient(135deg, var(--accent), var(--accent2));\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n  }\n\n  .login-sub {\n    color: var(--muted);\n    font-size: 13px;\n    margin-bottom: 36px;\n    font-family: var(--mono);\n  }\n\n  .field-group {\n    margin-bottom: 20px;\n  }\n\n  .field-group label {\n    display: block;\n    font-size: 11px;\n    font-family: var(--mono);\n    color: var(--muted);\n    text-transform: uppercase;\n    letter-spacing: 2px;\n    margin-bottom: 8px;\n  }\n\n  .field-group input, .field-group select, .field-group textarea {\n    width: 100%;\n    background: var(--bg);\n    border: 1px solid var(--border);\n    color: var(--text);\n    padding: 10px 14px;\n    font-family: var(--mono);\n    font-size: 13px;\n    outline: none;\n    transition: border-color 0.2s;\n  }\n\n  .field-group input:focus, .field-group select:focus, .field-group textarea:focus {\n    border-color: var(--accent);\n  }\n\n  .field-group textarea { resize: vertical; min-height: 80px; }\n  .field-group select { cursor: pointer; }\n  .field-group select option { background: var(--surface); }\n\n  .btn {\n    display: inline-flex;\n    align-items: center;\n    gap: 8px;\n    padding: 10px 20px;\n    font-family: var(--mono);\n    font-size: 12px;\n    font-weight: 700;\n    letter-spacing: 1px;\n    text-transform: uppercase;\n    border: none;\n    cursor: pointer;\n    transition: all 0.15s;\n  }\n\n  .btn-primary {\n    background: var(--accent);\n    color: #fff;\n  }\n\n  .btn-primary:hover { background: #6d28d9; }\n\n  .btn-secondary {\n    background: transparent;\n    color: var(--text);\n    border: 1px solid var(--border);\n  }\n\n  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }\n\n  .btn-danger {\n    background: transparent;\n    color: var(--danger);\n    border: 1px solid var(--danger);\n  }\n\n  .btn-danger:hover { background: var(--danger); color: #fff; }\n\n  .btn-success {\n    background: var(--success);\n    color: #fff;\n  }\n\n  .btn-success:hover { background: #059669; }\n\n  .btn-full { width: 100%; justify-content: center; }\n  .btn-sm { padding: 6px 12px; font-size: 10px; }\n\n  .error-msg {\n    background: rgba(239,68,68,0.1);\n    border: 1px solid var(--danger);\n    color: var(--danger);\n    padding: 10px 14px;\n    font-family: var(--mono);\n    font-size: 12px;\n    margin-top: 12px;\n    display: none;\n  }\n\n  /* \u2500\u2500\u2500 Main Layout \u2500\u2500\u2500 */\n  #app { display: none; min-height: 100vh; position: relative; z-index: 1; }\n\n  .sidebar {\n    position: fixed;\n    left: 0; top: 0; bottom: 0;\n    width: 220px;\n    background: var(--surface);\n    border-right: 1px solid var(--border);\n    display: flex;\n    flex-direction: column;\n    z-index: 10;\n  }\n\n  .sidebar-logo {\n    padding: 24px 20px;\n    border-bottom: 1px solid var(--border);\n    font-weight: 800;\n    font-size: 18px;\n    letter-spacing: -0.5px;\n    background: linear-gradient(135deg, var(--accent), var(--accent2));\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n  }\n\n  .sidebar-tag {\n    font-family: var(--mono);\n    font-size: 9px;\n    color: var(--muted);\n    -webkit-text-fill-color: var(--muted);\n    display: block;\n    margin-top: 2px;\n    letter-spacing: 2px;\n  }\n\n  .nav-section {\n    padding: 16px 0;\n    border-bottom: 1px solid var(--border);\n  }\n\n  .nav-label {\n    font-size: 9px;\n    font-family: var(--mono);\n    color: var(--muted);\n    text-transform: uppercase;\n    letter-spacing: 2px;\n    padding: 0 20px 8px;\n  }\n\n  .nav-item {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n    padding: 9px 20px;\n    font-size: 13px;\n    font-weight: 600;\n    color: var(--muted);\n    cursor: pointer;\n    transition: all 0.15s;\n    border-left: 2px solid transparent;\n  }\n\n  .nav-item:hover { color: var(--text); background: var(--surface2); }\n  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(124,58,237,0.08); }\n  .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }\n\n  .sidebar-footer {\n    margin-top: auto;\n    padding: 16px 20px;\n    border-top: 1px solid var(--border);\n    font-family: var(--mono);\n    font-size: 10px;\n    color: var(--muted);\n  }\n\n  .status-dot {\n    display: inline-block;\n    width: 6px; height: 6px;\n    border-radius: 50%;\n    background: var(--success);\n    margin-right: 6px;\n    animation: pulse 2s infinite;\n  }\n\n  @keyframes pulse {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.4; }\n  }\n\n  .main {\n    margin-left: 220px;\n    padding: 32px;\n    min-height: 100vh;\n  }\n\n  .page-header {\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    margin-bottom: 28px;\n  }\n\n  .page-title {\n    font-size: 24px;\n    font-weight: 800;\n    letter-spacing: -0.5px;\n  }\n\n  .page-sub {\n    font-family: var(--mono);\n    font-size: 11px;\n    color: var(--muted);\n    margin-top: 3px;\n  }\n\n  /* \u2500\u2500\u2500 Stats Grid \u2500\u2500\u2500 */\n  .stats-grid {\n    display: grid;\n    grid-template-columns: repeat(4, 1fr);\n    gap: 16px;\n    margin-bottom: 28px;\n  }\n\n  .stat-card {\n    background: var(--surface);\n    border: 1px solid var(--border);\n    padding: 20px;\n    position: relative;\n    overflow: hidden;\n  }\n\n  .stat-card::after {\n    content: '';\n    position: absolute;\n    bottom: 0; left: 0; right: 0;\n    height: 2px;\n    background: linear-gradient(90deg, var(--accent), transparent);\n  }\n\n  .stat-label {\n    font-family: var(--mono);\n    font-size: 10px;\n    color: var(--muted);\n    text-transform: uppercase;\n    letter-spacing: 2px;\n    margin-bottom: 10px;\n  }\n\n  .stat-value {\n    font-size: 32px;\n    font-weight: 800;\n    letter-spacing: -1px;\n    font-family: var(--mono);\n  }\n\n  .stat-sub {\n    font-size: 11px;\n    color: var(--muted);\n    margin-top: 4px;\n    font-family: var(--mono);\n  }\n\n  .stat-accent { color: var(--accent); }\n  .stat-success { color: var(--success); }\n  .stat-danger { color: var(--danger); }\n  .stat-warning { color: var(--accent3); }\n\n  /* \u2500\u2500\u2500 Table \u2500\u2500\u2500 */\n  .card {\n    background: var(--surface);\n    border: 1px solid var(--border);\n    margin-bottom: 20px;\n  }\n\n  .card-header {\n    padding: 16px 20px;\n    border-bottom: 1px solid var(--border);\n    display: flex;\n    align-items: center;\n    justify-content: space-between;\n    gap: 12px;\n    flex-wrap: wrap;\n  }\n\n  .card-title {\n    font-size: 14px;\n    font-weight: 700;\n    letter-spacing: 0.5px;\n  }\n\n  .card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }\n\n  .search-input {\n    background: var(--bg);\n    border: 1px solid var(--border);\n    color: var(--text);\n    padding: 7px 12px;\n    font-family: var(--mono);\n    font-size: 12px;\n    outline: none;\n    width: 220px;\n    transition: border-color 0.2s;\n  }\n\n  .search-input:focus { border-color: var(--accent); }\n\n  table {\n    width: 100%;\n    border-collapse: collapse;\n    font-size: 12px;\n  }\n\n  th {\n    padding: 10px 16px;\n    text-align: left;\n    font-family: var(--mono);\n    font-size: 10px;\n    color: var(--muted);\n    text-transform: uppercase;\n    letter-spacing: 2px;\n    border-bottom: 1px solid var(--border);\n    background: var(--surface2);\n    white-space: nowrap;\n  }\n\n  td {\n    padding: 12px 16px;\n    border-bottom: 1px solid rgba(42,42,56,0.5);\n    font-family: var(--mono);\n    font-size: 11px;\n    vertical-align: middle;\n  }\n\n  tr:last-child td { border-bottom: none; }\n  tr:hover td { background: rgba(124,58,237,0.04); }\n\n  .badge {\n    display: inline-block;\n    padding: 2px 8px;\n    font-size: 9px;\n    font-family: var(--mono);\n    font-weight: 700;\n    letter-spacing: 1px;\n    text-transform: uppercase;\n    border: 1px solid;\n  }\n\n  .badge-active { color: var(--success); border-color: var(--success); background: rgba(16,185,129,0.08); }\n  .badge-revoked { color: var(--danger); border-color: var(--danger); background: rgba(239,68,68,0.08); }\n  .badge-expired { color: var(--muted); border-color: var(--muted); background: rgba(100,116,139,0.08); }\n  .badge-online { color: var(--accent2); border-color: var(--accent2); background: rgba(6,182,212,0.08); }\n  .badge-offline { color: var(--muted); border-color: var(--muted); }\n\n  .key-display {\n    font-family: var(--mono);\n    font-size: 11px;\n    color: var(--accent2);\n    cursor: pointer;\n    transition: color 0.15s;\n  }\n\n  .key-display:hover { color: var(--accent); }\n\n  /* \u2500\u2500\u2500 Modal \u2500\u2500\u2500 */\n  .modal-overlay {\n    position: fixed;\n    inset: 0;\n    background: rgba(0,0,0,0.7);\n    z-index: 50;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    backdrop-filter: blur(4px);\n    display: none;\n  }\n\n  .modal-overlay.open { display: flex; }\n\n  .modal {\n    background: var(--surface);\n    border: 1px solid var(--border);\n    border-top: 2px solid var(--accent);\n    width: 480px;\n    max-width: 90vw;\n    max-height: 80vh;\n    overflow-y: auto;\n    position: relative;\n  }\n\n  .modal-header {\n    padding: 20px 24px;\n    border-bottom: 1px solid var(--border);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n  }\n\n  .modal-title { font-size: 16px; font-weight: 700; }\n\n  .modal-close {\n    background: none;\n    border: none;\n    color: var(--muted);\n    font-size: 20px;\n    cursor: pointer;\n    line-height: 1;\n    transition: color 0.15s;\n  }\n\n  .modal-close:hover { color: var(--text); }\n\n  .modal-body { padding: 24px; }\n  .modal-footer {\n    padding: 16px 24px;\n    border-top: 1px solid var(--border);\n    display: flex;\n    gap: 10px;\n    justify-content: flex-end;\n  }\n\n  /* \u2500\u2500\u2500 Chart placeholder \u2500\u2500\u2500 */\n  .chart-container {\n    height: 180px;\n    display: flex;\n    align-items: flex-end;\n    gap: 6px;\n    padding: 20px;\n  }\n\n  .chart-bar-wrap {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    gap: 6px;\n    height: 100%;\n    justify-content: flex-end;\n  }\n\n  .chart-bar {\n    width: 100%;\n    background: linear-gradient(180deg, var(--accent), rgba(124,58,237,0.3));\n    transition: height 0.5s cubic-bezier(0.34,1.56,0.64,1);\n    min-height: 2px;\n  }\n\n  .chart-label {\n    font-family: var(--mono);\n    font-size: 8px;\n    color: var(--muted);\n    white-space: nowrap;\n  }\n\n  /* \u2500\u2500\u2500 Toast \u2500\u2500\u2500 */\n  #toast-container {\n    position: fixed;\n    bottom: 24px;\n    right: 24px;\n    z-index: 999;\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n  }\n\n  .toast {\n    padding: 12px 20px;\n    font-family: var(--mono);\n    font-size: 12px;\n    border-left: 3px solid var(--success);\n    background: var(--surface);\n    border: 1px solid var(--border);\n    border-left: 3px solid var(--success);\n    animation: slideIn 0.2s ease;\n    min-width: 260px;\n  }\n\n  .toast.error { border-left-color: var(--danger); }\n  .toast.warning { border-left-color: var(--accent3); }\n\n  @keyframes slideIn {\n    from { transform: translateX(100%); opacity: 0; }\n    to { transform: translateX(0); opacity: 1; }\n  }\n\n  /* \u2500\u2500\u2500 Tab pages \u2500\u2500\u2500 */\n  .tab-page { display: none; }\n  .tab-page.active { display: block; }\n\n  /* \u2500\u2500\u2500 Misc \u2500\u2500\u2500 */\n  .flex { display: flex; }\n  .gap-2 { gap: 8px; }\n  .items-center { align-items: center; }\n  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }\n  .text-muted { color: var(--muted); }\n  .text-mono { font-family: var(--mono); font-size: 11px; }\n  .mt-4 { margin-top: 16px; }\n  .mb-4 { margin-bottom: 16px; }\n  .empty-state { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }\n\n  .inline-edit {\n    background: transparent;\n    border: none;\n    border-bottom: 1px dashed var(--border);\n    color: var(--text);\n    font-family: var(--mono);\n    font-size: 11px;\n    padding: 2px 4px;\n    width: 100%;\n    outline: none;\n  }\n\n  .inline-edit:focus { border-bottom-color: var(--accent); }\n\n  .copy-btn {\n    background: none;\n    border: none;\n    color: var(--muted);\n    cursor: pointer;\n    font-size: 12px;\n    padding: 0 4px;\n    transition: color 0.15s;\n  }\n\n  .copy-btn:hover { color: var(--accent); }\n\n  @media (max-width: 900px) {\n    .stats-grid { grid-template-columns: repeat(2, 1fr); }\n    .sidebar { width: 180px; }\n    .main { margin-left: 180px; padding: 20px; }\n    .grid-2 { grid-template-columns: 1fr; }\n  }\n</style>\n</head>\n<body>\n\n<!-- \u2500\u2500\u2500 Login Screen \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n<div id=\"login-screen\">\n  <div class=\"login-box\">\n    <div class=\"login-logo\">LicenseForge</div>\n    <div class=\"login-sub\">// ADMIN CONSOLE v1.0.0</div>\n    <div class=\"field-group\">\n      <label>Backend URL</label>\n      <input type=\"text\" id=\"login-url\" placeholder=\"https://your-app.onrender.com\" />\n    </div>\n    <div class=\"field-group\">\n      <label>Admin Key</label>\n      <input type=\"password\" id=\"login-key\" placeholder=\"Your ADMIN_KEY from .env\" />\n    </div>\n    <button class=\"btn btn-primary btn-full\" onclick=\"doLogin()\">\u26a1 Connect</button>\n    <div class=\"error-msg\" id=\"login-error\"></div>\n  </div>\n</div>\n\n<!-- \u2500\u2500\u2500 Main App \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n<div id=\"app\">\n  <aside class=\"sidebar\">\n    <div class=\"sidebar-logo\">\n      LicenseForge\n      <span class=\"sidebar-tag\">// ADMIN</span>\n    </div>\n    <div class=\"nav-section\">\n      <div class=\"nav-label\">Overview</div>\n      <div class=\"nav-item active\" onclick=\"showTab('dashboard')\">\n        <span class=\"icon\">\ud83d\udcca</span> Dashboard\n      </div>\n      <div class=\"nav-item\" onclick=\"showTab('analytics')\">\n        <span class=\"icon\">\ud83d\udcc8</span> Analytics\n      </div>\n    </div>\n    <div class=\"nav-section\">\n      <div class=\"nav-label\">Management</div>\n      <div class=\"nav-item\" onclick=\"showTab('licenses')\">\n        <span class=\"icon\">\ud83d\udd11</span> Licenses\n      </div>\n      <div class=\"nav-item\" onclick=\"showTab('sessions')\">\n        <span class=\"icon\">\ud83d\udc65</span> Sessions\n      </div>\n      <div class=\"nav-item\" onclick=\"showTab('versions')\">\n        <span class=\"icon\">\ud83d\ude80</span> Versions\n      </div>\n    </div>\n    <div class=\"sidebar-footer\">\n      <span class=\"status-dot\"></span>Connected\n      <div style=\"margin-top:8px;\" id=\"sidebar-url\" class=\"text-muted\"></div>\n    </div>\n  </aside>\n\n  <main class=\"main\">\n    <!-- Dashboard -->\n    <div id=\"tab-dashboard\" class=\"tab-page active\">\n      <div class=\"page-header\">\n        <div>\n          <div class=\"page-title\">Dashboard</div>\n          <div class=\"page-sub\">// Real-time overview</div>\n        </div>\n        <button class=\"btn btn-secondary\" onclick=\"loadAll()\">\u27f3 Refresh</button>\n      </div>\n\n      <div class=\"stats-grid\">\n        <div class=\"stat-card\">\n          <div class=\"stat-label\">Total Licenses</div>\n          <div class=\"stat-value stat-accent\" id=\"stat-total\">\u2014</div>\n          <div class=\"stat-sub\">all time created</div>\n        </div>\n        <div class=\"stat-card\">\n          <div class=\"stat-label\">Active</div>\n          <div class=\"stat-value stat-success\" id=\"stat-active\">\u2014</div>\n          <div class=\"stat-sub\">valid &amp; in use</div>\n        </div>\n        <div class=\"stat-card\">\n          <div class=\"stat-label\">Live Sessions</div>\n          <div class=\"stat-value stat-warning\" id=\"stat-sessions\">\u2014</div>\n          <div class=\"stat-sub\">last 5 minutes</div>\n        </div>\n        <div class=\"stat-card\">\n          <div class=\"stat-label\">Failed Auths</div>\n          <div class=\"stat-value stat-danger\" id=\"stat-failed\">\u2014</div>\n          <div class=\"stat-sub\">total blocked</div>\n        </div>\n      </div>\n\n      <!-- Recent Events -->\n      <div class=\"card\">\n        <div class=\"card-header\">\n          <div class=\"card-title\">Recent Auth Events</div>\n          <button class=\"btn btn-secondary btn-sm\" onclick=\"loadStats()\">\u27f3</button>\n        </div>\n        <table>\n          <thead>\n            <tr>\n              <th>Time</th>\n              <th>Type</th>\n              <th>Key</th>\n              <th>Reason</th>\n              <th>IP</th>\n            </tr>\n          </thead>\n          <tbody id=\"events-table\">\n            <tr><td colspan=\"5\" class=\"empty-state\">Loading...</td></tr>\n          </tbody>\n        </table>\n      </div>\n    </div>\n\n    <!-- Analytics -->\n    <div id=\"tab-analytics\" class=\"tab-page\">\n      <div class=\"page-header\">\n        <div>\n          <div class=\"page-title\">Analytics</div>\n          <div class=\"page-sub\">// 7-day activity overview</div>\n        </div>\n      </div>\n      <div class=\"card\">\n        <div class=\"card-header\">\n          <div class=\"card-title\">Daily Validations</div>\n        </div>\n        <div class=\"chart-container\" id=\"chart-container\">\n          <div class=\"empty-state\">No data yet</div>\n        </div>\n      </div>\n      <div class=\"grid-2\">\n        <div class=\"card\">\n          <div class=\"card-header\"><div class=\"card-title\">Success Rate</div></div>\n          <div style=\"padding:24px; text-align:center;\">\n            <div class=\"stat-value stat-success\" id=\"success-rate\">\u2014</div>\n            <div class=\"stat-sub\">validations passing</div>\n          </div>\n        </div>\n        <div class=\"card\">\n          <div class=\"card-header\"><div class=\"card-title\">Total Requests</div></div>\n          <div style=\"padding:24px; text-align:center;\">\n            <div class=\"stat-value stat-accent\" id=\"total-requests\">\u2014</div>\n            <div class=\"stat-sub\">all time validations</div>\n          </div>\n        </div>\n      </div>\n    </div>\n\n    <!-- Licenses -->\n    <div id=\"tab-licenses\" class=\"tab-page\">\n      <div class=\"page-header\">\n        <div>\n          <div class=\"page-title\">License Keys</div>\n          <div class=\"page-sub\">// Manage all license keys</div>\n        </div>\n        <div class=\"flex gap-2\">\n          <button class=\"btn btn-secondary\" onclick=\"openBulkModal()\">\u26a1 Bulk Create</button>\n          <button class=\"btn btn-primary\" onclick=\"openCreateModal()\">+ New Key</button>\n        </div>\n      </div>\n\n      <div class=\"card\">\n        <div class=\"card-header\">\n          <div class=\"card-title\" id=\"license-count\">Keys</div>\n          <div class=\"card-actions\">\n            <input class=\"search-input\" type=\"text\" id=\"license-search\" placeholder=\"Search keys...\" oninput=\"filterLicenses()\">\n            <select class=\"search-input\" style=\"width:130px;\" id=\"license-filter\" onchange=\"filterLicenses()\">\n              <option value=\"\">All Status</option>\n              <option value=\"active\">Active</option>\n              <option value=\"revoked\">Revoked</option>\n              <option value=\"expired\">Expired</option>\n            </select>\n          </div>\n        </div>\n        <table>\n          <thead>\n            <tr>\n              <th>Key</th>\n              <th>Status</th>\n              <th>HWID</th>\n              <th>Expires</th>\n              <th>Uses</th>\n              <th>Last Used</th>\n              <th>Note</th>\n              <th>Actions</th>\n            </tr>\n          </thead>\n          <tbody id=\"licenses-table\">\n            <tr><td colspan=\"8\" class=\"empty-state\">Loading...</td></tr>\n          </tbody>\n        </table>\n      </div>\n    </div>\n\n    <!-- Sessions -->\n    <div id=\"tab-sessions\" class=\"tab-page\">\n      <div class=\"page-header\">\n        <div>\n          <div class=\"page-title\">Active Sessions</div>\n          <div class=\"page-sub\">// Users currently online</div>\n        </div>\n        <button class=\"btn btn-secondary\" onclick=\"loadSessions()\">\u27f3 Refresh</button>\n      </div>\n      <div class=\"card\">\n        <div class=\"card-header\">\n          <div class=\"card-title\" id=\"sessions-count\">Sessions</div>\n        </div>\n        <table>\n          <thead>\n            <tr>\n              <th>Session ID</th>\n              <th>License Key</th>\n              <th>IP</th>\n              <th>Version</th>\n              <th>Started</th>\n              <th>Last Ping</th>\n              <th>Status</th>\n              <th>Actions</th>\n            </tr>\n          </thead>\n          <tbody id=\"sessions-table\">\n            <tr><td colspan=\"8\" class=\"empty-state\">Loading...</td></tr>\n          </tbody>\n        </table>\n      </div>\n    </div>\n\n    <!-- Versions -->\n    <div id=\"tab-versions\" class=\"tab-page\">\n      <div class=\"page-header\">\n        <div>\n          <div class=\"page-title\">Script Versions</div>\n          <div class=\"page-sub\">// Manage script deployments</div>\n        </div>\n        <button class=\"btn btn-primary\" onclick=\"openVersionModal()\">+ Deploy Version</button>\n      </div>\n      <div class=\"card\">\n        <div class=\"card-header\"><div class=\"card-title\">Version History</div></div>\n        <table>\n          <thead>\n            <tr>\n              <th>Version</th>\n              <th>Checksum</th>\n              <th>URL</th>\n              <th>Changelog</th>\n              <th>Deployed</th>\n              <th>Status</th>\n              <th>Actions</th>\n            </tr>\n          </thead>\n          <tbody id=\"versions-table\">\n            <tr><td colspan=\"7\" class=\"empty-state\">Loading...</td></tr>\n          </tbody>\n        </table>\n      </div>\n    </div>\n  </main>\n</div>\n\n<!-- \u2500\u2500\u2500 Modals \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n\n<!-- Create License Modal -->\n<div class=\"modal-overlay\" id=\"create-modal\">\n  <div class=\"modal\">\n    <div class=\"modal-header\">\n      <div class=\"modal-title\">Create License Key</div>\n      <button class=\"modal-close\" onclick=\"closeModal('create-modal')\">\u00d7</button>\n    </div>\n    <div class=\"modal-body\">\n      <div class=\"field-group\">\n        <label>Expiry (days)</label>\n        <input type=\"number\" id=\"create-days\" placeholder=\"30 (leave empty = never expires)\" />\n      </div>\n      <div class=\"field-group\">\n        <label>Note</label>\n        <input type=\"text\" id=\"create-note\" placeholder=\"Customer name, order ID, etc.\" />\n      </div>\n      <div class=\"field-group\">\n        <label>IP Whitelist (comma-separated, leave empty = allow all)</label>\n        <input type=\"text\" id=\"create-ips\" placeholder=\"1.2.3.4, 5.6.7.8\" />\n      </div>\n    </div>\n    <div class=\"modal-footer\">\n      <button class=\"btn btn-secondary\" onclick=\"closeModal('create-modal')\">Cancel</button>\n      <button class=\"btn btn-primary\" onclick=\"createLicense()\">Create Key</button>\n    </div>\n  </div>\n</div>\n\n<!-- Bulk Create Modal -->\n<div class=\"modal-overlay\" id=\"bulk-modal\">\n  <div class=\"modal\">\n    <div class=\"modal-header\">\n      <div class=\"modal-title\">Bulk Create Keys</div>\n      <button class=\"modal-close\" onclick=\"closeModal('bulk-modal')\">\u00d7</button>\n    </div>\n    <div class=\"modal-body\">\n      <div class=\"field-group\">\n        <label>Count (max 100)</label>\n        <input type=\"number\" id=\"bulk-count\" value=\"10\" min=\"1\" max=\"100\" />\n      </div>\n      <div class=\"field-group\">\n        <label>Expiry (days)</label>\n        <input type=\"number\" id=\"bulk-days\" placeholder=\"30 (leave empty = never)\" />\n      </div>\n      <div class=\"field-group\">\n        <label>Note</label>\n        <input type=\"text\" id=\"bulk-note\" placeholder=\"Batch label...\" />\n      </div>\n      <div id=\"bulk-result\" style=\"display:none;\" class=\"mt-4\">\n        <div class=\"field-group\">\n          <label>Generated Keys</label>\n          <textarea id=\"bulk-keys-output\" readonly style=\"height:200px; font-size:11px;\"></textarea>\n        </div>\n      </div>\n    </div>\n    <div class=\"modal-footer\">\n      <button class=\"btn btn-secondary\" onclick=\"closeModal('bulk-modal')\">Close</button>\n      <button class=\"btn btn-primary\" onclick=\"bulkCreate()\">Generate Keys</button>\n    </div>\n  </div>\n</div>\n\n<!-- Deploy Version Modal -->\n<div class=\"modal-overlay\" id=\"version-modal\">\n  <div class=\"modal\">\n    <div class=\"modal-header\">\n      <div class=\"modal-title\">Deploy New Version</div>\n      <button class=\"modal-close\" onclick=\"closeModal('version-modal')\">\u00d7</button>\n    </div>\n    <div class=\"modal-body\">\n      <div class=\"field-group\">\n        <label>Version Number</label>\n        <input type=\"text\" id=\"version-num\" placeholder=\"1.2.0\" />\n      </div>\n      <div class=\"field-group\">\n        <label>Script URL (CDN/raw URL)</label>\n        <input type=\"text\" id=\"version-url\" placeholder=\"https://cdn.example.com/script.js\" />\n      </div>\n      <div class=\"field-group\">\n        <label>Changelog</label>\n        <textarea id=\"version-changelog\" placeholder=\"What changed in this version...\"></textarea>\n      </div>\n    </div>\n    <div class=\"modal-footer\">\n      <button class=\"btn btn-secondary\" onclick=\"closeModal('version-modal')\">Cancel</button>\n      <button class=\"btn btn-primary\" onclick=\"deployVersion()\">\ud83d\ude80 Deploy</button>\n    </div>\n  </div>\n</div>\n\n<!-- \u2500\u2500\u2500 Toast Container \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 -->\n<div id=\"toast-container\"></div>\n\n<script>\n  // \u2500\u2500\u2500 State \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  let API_URL = '';\n  let ADMIN_KEY = '';\n  let licensesData = [];\n\n  // \u2500\u2500\u2500 Auth \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function doLogin() {\n    const url = document.getElementById('login-url').value.trim().replace(/\\/$/, '');\n    const key = document.getElementById('login-key').value.trim();\n    const err = document.getElementById('login-error');\n\n    if (!url || !key) { showErr(err, 'Please fill in all fields'); return; }\n\n    try {\n      const res = await fetch(`${url}/admin/stats`, {\n        headers: { 'x-admin-key': key }\n      });\n      if (!res.ok) { showErr(err, 'Invalid admin key or server error'); return; }\n\n      API_URL = url;\n      ADMIN_KEY = key;\n      document.getElementById('sidebar-url').textContent = url.replace('https://', '');\n      document.getElementById('login-screen').style.display = 'none';\n      document.getElementById('app').style.display = 'block';\n      loadAll();\n    } catch (e) {\n      showErr(err, 'Cannot connect \u2014 check URL and CORS settings');\n    }\n  }\n\n  function showErr(el, msg) {\n    el.textContent = '\u26a0 ' + msg;\n    el.style.display = 'block';\n  }\n\n  // \u2500\u2500\u2500 API Helper \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function api(method, path, body) {\n    const opts = {\n      method,\n      headers: { 'Content-Type': 'application/json', 'x-admin-key': ADMIN_KEY }\n    };\n    if (body) opts.body = JSON.stringify(body);\n    const res = await fetch(API_URL + path, opts);\n    return res.json();\n  }\n\n  // \u2500\u2500\u2500 Navigation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  function showTab(name) {\n    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));\n    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));\n    document.getElementById('tab-' + name).classList.add('active');\n    event.currentTarget.classList.add('active');\n\n    if (name === 'dashboard') loadAll();\n    if (name === 'licenses') loadLicenses();\n    if (name === 'sessions') loadSessions();\n    if (name === 'versions') loadVersions();\n    if (name === 'analytics') { loadStats(); }\n  }\n\n  // \u2500\u2500\u2500 Load All \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function loadAll() {\n    await Promise.all([loadStats(), loadLicenses(), loadSessions()]);\n  }\n\n  // \u2500\u2500\u2500 Stats \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function loadStats() {\n    const data = await api('GET', '/admin/stats');\n    if (!data.success) return;\n    const s = data.stats;\n\n    document.getElementById('stat-total').textContent = s.total_licenses;\n    document.getElementById('stat-active').textContent = s.active_licenses;\n    document.getElementById('stat-sessions').textContent = s.active_sessions;\n    document.getElementById('stat-failed').textContent = s.failed_validations;\n\n    const total = s.total_validations + s.failed_validations;\n    const rate = total > 0 ? Math.round((s.total_validations / total) * 100) : 0;\n    const sr = document.getElementById('success-rate');\n    if (sr) sr.textContent = rate + '%';\n    const tr = document.getElementById('total-requests');\n    if (tr) tr.textContent = total;\n\n    // Events table\n    const tbody = document.getElementById('events-table');\n    if (s.recent_events && s.recent_events.length) {\n      tbody.innerHTML = s.recent_events.map(e => `\n        <tr>\n          <td>${new Date(e.timestamp).toLocaleTimeString()}</td>\n          <td><span class=\"badge ${e.type === 'success' ? 'badge-active' : 'badge-revoked'}\">${e.type}</span></td>\n          <td class=\"key-display\">${e.key ? e.key.slice(0,9)+'...' : '\u2014'}</td>\n          <td class=\"text-muted\">${e.reason || '\u2713 OK'}</td>\n          <td>${e.ip || '\u2014'}</td>\n        </tr>\n      `).join('');\n    } else {\n      tbody.innerHTML = '<tr><td colspan=\"5\" class=\"empty-state\">No events yet</td></tr>';\n    }\n\n    // Chart\n    renderChart(s.daily_activity || []);\n  }\n\n  function renderChart(data) {\n    const container = document.getElementById('chart-container');\n    if (!container) return;\n    if (!data.length) { container.innerHTML = '<div class=\"empty-state\">No activity data yet</div>'; return; }\n\n    const max = Math.max(...data.map(d => d.count), 1);\n    container.innerHTML = data.map(d => {\n      const pct = (d.count / max) * 100;\n      const label = d.date.slice(5); // MM-DD\n      return `\n        <div class=\"chart-bar-wrap\">\n          <div style=\"font-family:var(--mono);font-size:9px;color:var(--accent)\">${d.count}</div>\n          <div class=\"chart-bar\" style=\"height:${pct}%\"></div>\n          <div class=\"chart-label\">${label}</div>\n        </div>\n      `;\n    }).join('');\n  }\n\n  // \u2500\u2500\u2500 Licenses \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function loadLicenses() {\n    const data = await api('GET', '/admin/licenses');\n    if (!data.success) return;\n    licensesData = data.licenses;\n    renderLicenses(licensesData);\n  }\n\n  function filterLicenses() {\n    const search = document.getElementById('license-search').value.toLowerCase();\n    const filter = document.getElementById('license-filter').value;\n    const filtered = licensesData.filter(l => {\n      const matchSearch = !search ||\n        l.key.toLowerCase().includes(search) ||\n        (l.note && l.note.toLowerCase().includes(search)) ||\n        (l.hwid && l.hwid.toLowerCase().includes(search));\n      const matchFilter = !filter || l.status === filter;\n      return matchSearch && matchFilter;\n    });\n    renderLicenses(filtered);\n  }\n\n  function renderLicenses(licenses) {\n    document.getElementById('license-count').textContent = `Keys (${licenses.length})`;\n    const tbody = document.getElementById('licenses-table');\n    if (!licenses.length) {\n      tbody.innerHTML = '<tr><td colspan=\"8\" class=\"empty-state\">No licenses found</td></tr>';\n      return;\n    }\n\n    tbody.innerHTML = licenses.map(l => {\n      const exp = l.expires_at ? new Date(l.expires_at).toLocaleDateString() : '\u221e Never';\n      const lu = l.last_used ? new Date(l.last_used).toLocaleDateString() : '\u2014';\n      const hwid = l.hwid ? l.hwid.slice(0, 12) + '...' : '<span class=\"text-muted\">unbound</span>';\n      return `\n        <tr>\n          <td>\n            <span class=\"key-display\" title=\"${l.key}\" onclick=\"copyText('${l.key}')\">${l.key.slice(0,16)}\u2026</span>\n            <button class=\"copy-btn\" onclick=\"copyText('${l.key}')\" title=\"Copy key\">\u29c9</button>\n          </td>\n          <td><span class=\"badge badge-${l.status}\">${l.status}</span></td>\n          <td class=\"text-mono\">${hwid}</td>\n          <td class=\"text-mono\">${exp}</td>\n          <td class=\"text-mono\">${l.uses || 0}</td>\n          <td class=\"text-mono\">${lu}</td>\n          <td class=\"text-muted\" style=\"max-width:120px;overflow:hidden;text-overflow:ellipsis;\">${l.note || ''}</td>\n          <td>\n            <div class=\"flex gap-2\">\n              ${l.status === 'active'\n                ? `<button class=\"btn btn-danger btn-sm\" onclick=\"revokeKey('${l.key}')\">Revoke</button>`\n                : `<button class=\"btn btn-success btn-sm\" onclick=\"activateKey('${l.key}')\">Activate</button>`\n              }\n              ${l.hwid ? `<button class=\"btn btn-secondary btn-sm\" onclick=\"resetHWID('${l.key}')\">\u21ba HWID</button>` : ''}\n            </div>\n          </td>\n        </tr>\n      `;\n    }).join('');\n  }\n\n  async function revokeKey(key) {\n    if (!confirm(`Revoke key ${key}?`)) return;\n    await api('DELETE', `/admin/licenses/${key}`);\n    toast('Key revoked');\n    loadLicenses();\n  }\n\n  async function activateKey(key) {\n    await api('PATCH', `/admin/licenses/${key}`, { status: 'active' });\n    toast('Key activated');\n    loadLicenses();\n  }\n\n  async function resetHWID(key) {\n    if (!confirm(`Reset HWID for ${key}? This allows the user to re-bind from a new machine.`)) return;\n    await api('PATCH', `/admin/licenses/${key}`, { reset_hwid: true });\n    toast('HWID reset successfully');\n    loadLicenses();\n  }\n\n  // \u2500\u2500\u2500 Create License \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function createLicense() {\n    const days = parseInt(document.getElementById('create-days').value) || null;\n    const note = document.getElementById('create-note').value;\n    const ipsRaw = document.getElementById('create-ips').value;\n    const ip_whitelist = ipsRaw ? ipsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];\n\n    const data = await api('POST', '/admin/licenses/create', {\n      expires_days: days, note, ip_whitelist\n    });\n\n    if (data.success) {\n      closeModal('create-modal');\n      toast(`Key created: ${data.license.key}`);\n      copyText(data.license.key);\n      loadLicenses();\n    } else {\n      toast('Error: ' + data.error, 'error');\n    }\n  }\n\n  async function bulkCreate() {\n    const count = parseInt(document.getElementById('bulk-count').value) || 1;\n    const days = parseInt(document.getElementById('bulk-days').value) || null;\n    const note = document.getElementById('bulk-note').value;\n\n    const data = await api('POST', '/admin/licenses/bulk-create', { count, expires_days: days, note });\n\n    if (data.success) {\n      document.getElementById('bulk-result').style.display = 'block';\n      document.getElementById('bulk-keys-output').value = data.created.map(l => l.key).join('\\n');\n      toast(`Created ${data.count} keys`);\n      loadLicenses();\n    } else {\n      toast('Error: ' + data.error, 'error');\n    }\n  }\n\n  // \u2500\u2500\u2500 Sessions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function loadSessions() {\n    const data = await api('GET', '/admin/sessions');\n    if (!data.success) return;\n\n    const sessions = data.sessions;\n    const active = sessions.filter(s => s.active).length;\n    document.getElementById('sessions-count').textContent = `Sessions (${active} online / ${sessions.length} total)`;\n\n    const tbody = document.getElementById('sessions-table');\n    if (!sessions.length) {\n      tbody.innerHTML = '<tr><td colspan=\"8\" class=\"empty-state\">No sessions found</td></tr>';\n      return;\n    }\n\n    tbody.innerHTML = sessions.map(s => `\n      <tr>\n        <td class=\"text-mono\">${s.session_id.slice(0, 10)}...</td>\n        <td class=\"key-display\">${s.license_key.slice(0,12)}...</td>\n        <td class=\"text-mono\">${s.ip}</td>\n        <td class=\"text-mono\">${s.version}</td>\n        <td class=\"text-mono\">${new Date(s.started_at).toLocaleString()}</td>\n        <td class=\"text-mono\">${new Date(s.last_ping).toLocaleTimeString()}</td>\n        <td><span class=\"badge ${s.active ? 'badge-online' : 'badge-offline'}\">${s.active ? 'online' : 'idle'}</span></td>\n        <td>\n          <button class=\"btn btn-danger btn-sm\" onclick=\"killSession('${s.session_id}')\">Kill</button>\n        </td>\n      </tr>\n    `).join('');\n  }\n\n  async function killSession(id) {\n    await api('DELETE', `/admin/sessions/${id}`);\n    toast('Session terminated');\n    loadSessions();\n  }\n\n  // \u2500\u2500\u2500 Versions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  async function loadVersions() {\n    const data = await api('GET', '/admin/versions');\n    if (!data.success) return;\n\n    const tbody = document.getElementById('versions-table');\n    if (!data.versions.length) {\n      tbody.innerHTML = '<tr><td colspan=\"7\" class=\"empty-state\">No versions deployed</td></tr>';\n      return;\n    }\n\n    tbody.innerHTML = [...data.versions].reverse().map(v => `\n      <tr>\n        <td class=\"text-mono\" style=\"color:var(--accent2)\">v${v.version}</td>\n        <td class=\"text-mono\" style=\"color:var(--muted)\">${v.checksum}</td>\n        <td style=\"max-width:200px;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:10px;\">\n          <a href=\"${v.url}\" target=\"_blank\" style=\"color:var(--accent);text-decoration:none;\">${v.url.replace('https://','')}</a>\n        </td>\n        <td class=\"text-muted\" style=\"max-width:150px;\">${v.changelog || '\u2014'}</td>\n        <td class=\"text-mono\">${new Date(v.created_at).toLocaleDateString()}</td>\n        <td>${v.active ? '<span class=\"badge badge-active\">active</span>' : '<span class=\"badge badge-offline\">inactive</span>'}</td>\n        <td>\n          ${!v.active ? `<button class=\"btn btn-success btn-sm\" onclick=\"activateVersion('${v.version}')\">\u26a1 Activate</button>` : '<span class=\"text-muted text-mono\">\u2014 live \u2014</span>'}\n        </td>\n      </tr>\n    `).join('');\n  }\n\n  async function deployVersion() {\n    const version = document.getElementById('version-num').value.trim();\n    const url = document.getElementById('version-url').value.trim();\n    const changelog = document.getElementById('version-changelog').value.trim();\n\n    if (!version || !url) { toast('Version and URL are required', 'error'); return; }\n\n    const data = await api('POST', '/admin/versions', { version, url, changelog });\n    if (data.success) {\n      closeModal('version-modal');\n      toast(`v${version} deployed and activated`);\n      loadVersions();\n    } else {\n      toast('Error: ' + data.error, 'error');\n    }\n  }\n\n  async function activateVersion(version) {\n    if (!confirm(`Activate v${version}? All users will load this version.`)) return;\n    await api('PATCH', `/admin/versions/${version}/activate`);\n    toast(`v${version} is now active`);\n    loadVersions();\n  }\n\n  // \u2500\u2500\u2500 Modals \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  function openCreateModal() { document.getElementById('create-modal').classList.add('open'); }\n  function openBulkModal() {\n    document.getElementById('bulk-result').style.display = 'none';\n    document.getElementById('bulk-modal').classList.add('open');\n  }\n  function openVersionModal() { document.getElementById('version-modal').classList.add('open'); }\n  function closeModal(id) { document.getElementById(id).classList.remove('open'); }\n\n  // Close modal on overlay click\n  document.querySelectorAll('.modal-overlay').forEach(el => {\n    el.addEventListener('click', e => {\n      if (e.target === el) el.classList.remove('open');\n    });\n  });\n\n  // \u2500\u2500\u2500 Utilities \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  function toast(msg, type = 'success') {\n    const div = document.createElement('div');\n    div.className = `toast ${type !== 'success' ? type : ''}`;\n    div.textContent = msg;\n    document.getElementById('toast-container').appendChild(div);\n    setTimeout(() => div.remove(), 3500);\n  }\n\n  function copyText(text) {\n    navigator.clipboard.writeText(text).then(() => toast('Copied: ' + text.slice(0,16) + '...'));\n  }\n\n  // Enter key on login\n  document.addEventListener('keydown', e => {\n    if (e.key === 'Enter' && document.getElementById('login-screen').style.display !== 'none') {\n      doLogin();\n    }\n  });\n\n  // Auto-refresh sessions every 15s\n  setInterval(() => {\n    const activeTab = document.querySelector('.tab-page.active');\n    if (activeTab && activeTab.id === 'tab-sessions') loadSessions();\n    if (activeTab && activeTab.id === 'tab-dashboard') loadStats();\n  }, 15000);\n</script>\n</body>\n</html>\n";
+
+// ─── In-memory DB ─────────────────────────────────────────────────────────────
 const db = {
   licenses: new Map(),
   sessions: new Map(),
@@ -24,7 +27,7 @@ const db = {
   adminKey: process.env.ADMIN_KEY || 'CHANGE_THIS_IN_ENV'
 };
 
-// ─── Seed a default license for testing ──────────────────────────────────────
+// ─── Seed demo license ────────────────────────────────────────────────────────
 db.licenses.set('TEST-XXXX-YYYY-ZZZZ', {
   key: 'TEST-XXXX-YYYY-ZZZZ',
   status: 'active',
@@ -47,62 +50,49 @@ db.scriptVersions.push({
 });
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
-const validateLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  message: { success: false, error: 'Too many requests' }
-});
+const validateLimiter = rateLimit({ windowMs: 60*1000, max: 10, message: { success: false, error: 'Too many requests' } });
+const adminLimiter    = rateLimit({ windowMs: 60*1000, max: 60, message: { success: false, error: 'Rate limit exceeded' } });
 
-const adminLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  message: { success: false, error: 'Rate limit exceeded' }
-});
-
-// ─── Middleware: Admin Auth ────────────────────────────────────────────────────
+// ─── Admin Auth Middleware ────────────────────────────────────────────────────
 function requireAdmin(req, res, next) {
   const key = req.headers['x-admin-key'];
-  if (!key || key !== db.adminKey) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
+  if (!key || key !== db.adminKey) return res.status(401).json({ success: false, error: 'Unauthorized' });
   next();
 }
 
-// ─── Helper: Generate License Key ─────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function generateKey() {
   const seg = () => crypto.randomBytes(2).toString('hex').toUpperCase();
   return `${seg()}${seg()}-${seg()}${seg()}-${seg()}${seg()}-${seg()}${seg()}`;
 }
 
-// ─── Helper: Get client IP ────────────────────────────────────────────────────
 function getIP(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-         req.socket.remoteAddress;
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
 }
 
-// ─── Helper: Track analytics ──────────────────────────────────────────────────
 function trackEvent(type, data) {
   const today = new Date().toISOString().split('T')[0];
   if (type === 'success') db.analytics.totalValidations++;
   if (type === 'failure') db.analytics.failedValidations++;
-
   const count = db.analytics.dailyActive.get(today) || 0;
   db.analytics.dailyActive.set(today, count + 1);
-
-  db.analytics.validationHistory.unshift({
-    type, ...data, timestamp: new Date().toISOString()
-  });
-
-  if (db.analytics.validationHistory.length > 500) {
+  db.analytics.validationHistory.unshift({ type, ...data, timestamp: new Date().toISOString() });
+  if (db.analytics.validationHistory.length > 500)
     db.analytics.validationHistory = db.analytics.validationHistory.slice(0, 500);
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PUBLIC ENDPOINTS (called by loader script)
+// SERVE ADMIN PANEL at GET /
+// ═══════════════════════════════════════════════════════════════════════════════
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(ADMIN_HTML);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PUBLIC API ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// POST /api/validate — Main license validation
 app.post('/api/validate', validateLimiter, (req, res) => {
   const { license_key, hwid, version } = req.body;
   const ip = getIP(req);
@@ -124,14 +114,12 @@ app.post('/api/validate', validateLimiter, (req, res) => {
     return res.status(403).json({ success: false, error: 'License has been revoked' });
   }
 
-  // Check expiry
   if (license.expires_at && new Date(license.expires_at) < new Date()) {
     license.status = 'expired';
     trackEvent('failure', { reason: 'expired', ip, key: license_key });
     return res.status(403).json({ success: false, error: 'License has expired' });
   }
 
-  // HWID lock: bind on first use, then enforce
   if (!license.hwid) {
     license.hwid = hwid;
   } else if (license.hwid !== hwid) {
@@ -139,7 +127,6 @@ app.post('/api/validate', validateLimiter, (req, res) => {
     return res.status(403).json({ success: false, error: 'Hardware ID mismatch. Contact support to reset.' });
   }
 
-  // IP whitelist check (skip if list is empty = allow all)
   if (license.ip_whitelist && license.ip_whitelist.length > 0) {
     if (!license.ip_whitelist.includes(ip)) {
       trackEvent('failure', { reason: 'ip_blocked', ip, key: license_key });
@@ -147,81 +134,53 @@ app.post('/api/validate', validateLimiter, (req, res) => {
     }
   }
 
-  // Update usage stats
   license.last_used = new Date().toISOString();
   license.uses = (license.uses || 0) + 1;
   license.last_ip = ip;
 
-  // Track active session
   const sessionId = crypto.randomBytes(16).toString('hex');
   db.sessions.set(sessionId, {
-    session_id: sessionId,
-    license_key,
-    hwid,
-    ip,
+    session_id: sessionId, license_key, hwid, ip,
     version: version || 'unknown',
     started_at: new Date().toISOString(),
     last_ping: new Date().toISOString()
   });
 
-  // Get latest active script version
   const activeVersion = db.scriptVersions.find(v => v.active) || db.scriptVersions[db.scriptVersions.length - 1];
-
   trackEvent('success', { ip, key: license_key, hwid });
 
   return res.json({
     success: true,
     session_id: sessionId,
     expires_at: license.expires_at,
-    script: activeVersion ? {
-      version: activeVersion.version,
-      url: activeVersion.url,
-      checksum: activeVersion.checksum
-    } : null
+    script: activeVersion ? { version: activeVersion.version, url: activeVersion.url, checksum: activeVersion.checksum } : null
   });
 });
 
-// POST /api/ping — Keep session alive
 app.post('/api/ping', validateLimiter, (req, res) => {
   const { session_id } = req.body;
   if (!session_id) return res.status(400).json({ success: false });
-
   const session = db.sessions.get(session_id);
   if (!session) return res.status(403).json({ success: false, error: 'Session not found' });
-
   session.last_ping = new Date().toISOString();
   return res.json({ success: true });
 });
 
-// GET /api/version — Get latest script version info
 app.get('/api/version', (req, res) => {
   const active = db.scriptVersions.find(v => v.active);
   if (!active) return res.status(404).json({ success: false });
-  return res.json({
-    success: true,
-    version: active.version,
-    checksum: active.checksum
-  });
+  return res.json({ success: true, version: active.version, checksum: active.checksum });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADMIN ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// GET /admin/stats
 app.get('/admin/stats', adminLimiter, requireAdmin, (req, res) => {
-  const now = Date.now();
-  const fiveMinAgo = now - 5 * 60 * 1000;
-
-  const activeSessions = [...db.sessions.values()].filter(s =>
-    new Date(s.last_ping).getTime() > fiveMinAgo
-  );
-
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+  const activeSessions = [...db.sessions.values()].filter(s => new Date(s.last_ping).getTime() > fiveMinAgo);
   const licenses = [...db.licenses.values()];
-  const dailyData = [];
-  for (const [date, count] of [...db.analytics.dailyActive.entries()].slice(-7)) {
-    dailyData.push({ date, count });
-  }
+  const dailyData = [...db.analytics.dailyActive.entries()].slice(-7).map(([date, count]) => ({ date, count }));
 
   res.json({
     success: true,
@@ -239,84 +198,52 @@ app.get('/admin/stats', adminLimiter, requireAdmin, (req, res) => {
   });
 });
 
-// GET /admin/licenses
 app.get('/admin/licenses', adminLimiter, requireAdmin, (req, res) => {
-  const licenses = [...db.licenses.values()];
-  res.json({ success: true, licenses });
+  res.json({ success: true, licenses: [...db.licenses.values()] });
 });
 
-// POST /admin/licenses/create
 app.post('/admin/licenses/create', adminLimiter, requireAdmin, (req, res) => {
   const { expires_days, note, ip_whitelist } = req.body;
   const key = generateKey();
-
   const license = {
-    key,
-    status: 'active',
-    hwid: null,
-    ip_whitelist: ip_whitelist || [],
-    expires_at: expires_days
-      ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString()
-      : null,
-    created_at: new Date().toISOString(),
-    last_used: null,
-    uses: 0,
-    note: note || ''
+    key, status: 'active', hwid: null, ip_whitelist: ip_whitelist || [],
+    expires_at: expires_days ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString() : null,
+    created_at: new Date().toISOString(), last_used: null, uses: 0, note: note || ''
   };
-
   db.licenses.set(key, license);
   res.json({ success: true, license });
 });
 
-// POST /admin/licenses/bulk-create
 app.post('/admin/licenses/bulk-create', adminLimiter, requireAdmin, (req, res) => {
   const { count = 1, expires_days, note } = req.body;
   const created = [];
-
   for (let i = 0; i < Math.min(count, 100); i++) {
     const key = generateKey();
     const license = {
-      key,
-      status: 'active',
-      hwid: null,
-      ip_whitelist: [],
-      expires_at: expires_days
-        ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString()
-        : null,
-      created_at: new Date().toISOString(),
-      last_used: null,
-      uses: 0,
-      note: note || ''
+      key, status: 'active', hwid: null, ip_whitelist: [],
+      expires_at: expires_days ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString() : null,
+      created_at: new Date().toISOString(), last_used: null, uses: 0, note: note || ''
     };
     db.licenses.set(key, license);
     created.push(license);
   }
-
   res.json({ success: true, created, count: created.length });
 });
 
-// PATCH /admin/licenses/:key
 app.patch('/admin/licenses/:key', adminLimiter, requireAdmin, (req, res) => {
   const key = req.params.key.toUpperCase();
   const license = db.licenses.get(key);
   if (!license) return res.status(404).json({ success: false, error: 'License not found' });
-
   const { status, expires_days, ip_whitelist, note, reset_hwid } = req.body;
-
   if (status) license.status = status;
   if (note !== undefined) license.note = note;
   if (ip_whitelist !== undefined) license.ip_whitelist = ip_whitelist;
   if (reset_hwid) license.hwid = null;
-  if (expires_days !== undefined) {
-    license.expires_at = expires_days
-      ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString()
-      : null;
-  }
-
+  if (expires_days !== undefined)
+    license.expires_at = expires_days ? new Date(Date.now() + expires_days * 24 * 60 * 60 * 1000).toISOString() : null;
   res.json({ success: true, license });
 });
 
-// DELETE /admin/licenses/:key (revoke)
 app.delete('/admin/licenses/:key', adminLimiter, requireAdmin, (req, res) => {
   const key = req.params.key.toUpperCase();
   const license = db.licenses.get(key);
@@ -325,49 +252,31 @@ app.delete('/admin/licenses/:key', adminLimiter, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-// GET /admin/sessions
 app.get('/admin/sessions', adminLimiter, requireAdmin, (req, res) => {
-  const now = Date.now();
-  const fiveMinAgo = now - 5 * 60 * 1000;
-  const sessions = [...db.sessions.values()].map(s => ({
-    ...s,
-    active: new Date(s.last_ping).getTime() > fiveMinAgo
-  }));
+  const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+  const sessions = [...db.sessions.values()].map(s => ({ ...s, active: new Date(s.last_ping).getTime() > fiveMinAgo }));
   res.json({ success: true, sessions });
 });
 
-// DELETE /admin/sessions/:id
 app.delete('/admin/sessions/:id', adminLimiter, requireAdmin, (req, res) => {
   db.sessions.delete(req.params.id);
   res.json({ success: true });
 });
 
-// GET /admin/versions
 app.get('/admin/versions', adminLimiter, requireAdmin, (req, res) => {
   res.json({ success: true, versions: db.scriptVersions });
 });
 
-// POST /admin/versions
 app.post('/admin/versions', adminLimiter, requireAdmin, (req, res) => {
   const { version, url, changelog } = req.body;
   if (!version || !url) return res.status(400).json({ success: false, error: 'version and url required' });
-
   const checksum = crypto.createHash('sha256').update(url + version).digest('hex').slice(0, 16);
-
-  // Deactivate old versions
   db.scriptVersions.forEach(v => v.active = false);
-
-  const newVersion = {
-    version, url, checksum, changelog: changelog || '',
-    created_at: new Date().toISOString(),
-    active: true
-  };
-
+  const newVersion = { version, url, checksum, changelog: changelog || '', created_at: new Date().toISOString(), active: true };
   db.scriptVersions.push(newVersion);
   res.json({ success: true, version: newVersion });
 });
 
-// PATCH /admin/versions/:version/activate
 app.patch('/admin/versions/:version/activate', adminLimiter, requireAdmin, (req, res) => {
   db.scriptVersions.forEach(v => v.active = false);
   const v = db.scriptVersions.find(v => v.version === req.params.version);
@@ -376,19 +285,14 @@ app.patch('/admin/versions/:version/activate', adminLimiter, requireAdmin, (req,
   res.json({ success: true, version: v });
 });
 
-// ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// ─── Clean up stale sessions every 10 minutes ────────────────────────────────
 setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000; // 30 min inactive
-  for (const [id, session] of db.sessions.entries()) {
-    if (new Date(session.last_ping).getTime() < cutoff) {
-      db.sessions.delete(id);
-    }
-  }
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [id, session] of db.sessions.entries())
+    if (new Date(session.last_ping).getTime() < cutoff) db.sessions.delete(id);
 }, 10 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🔐 License server running on port ${PORT}`));
-const path = require('path');
-app.use('/admin-ui', express.static(path.join(__dirname, 'public')));
