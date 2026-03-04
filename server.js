@@ -94,10 +94,10 @@ app.get('/', (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.post('/api/validate', validateLimiter, (req, res) => {
-  const { license_key, hwid, version } = req.body;
+  const { license_key, version } = req.body;
   const ip = getIP(req);
 
-  if (!license_key || !hwid) {
+  if (!license_key) {
     trackEvent('failure', { reason: 'missing_params', ip });
     return res.status(400).json({ success: false, error: 'Missing required fields' });
   }
@@ -120,13 +120,6 @@ app.post('/api/validate', validateLimiter, (req, res) => {
     return res.status(403).json({ success: false, error: 'License has expired' });
   }
 
-  if (!license.hwid) {
-    license.hwid = hwid;
-  } else if (license.hwid !== hwid) {
-    trackEvent('failure', { reason: 'hwid_mismatch', ip, key: license_key });
-    return res.status(403).json({ success: false, error: 'Hardware ID mismatch. Contact support to reset.' });
-  }
-
   if (license.ip_whitelist && license.ip_whitelist.length > 0) {
     if (!license.ip_whitelist.includes(ip)) {
       trackEvent('failure', { reason: 'ip_blocked', ip, key: license_key });
@@ -140,14 +133,14 @@ app.post('/api/validate', validateLimiter, (req, res) => {
 
   const sessionId = crypto.randomBytes(16).toString('hex');
   db.sessions.set(sessionId, {
-    session_id: sessionId, license_key, hwid, ip,
+    session_id: sessionId, license_key, ip,
     version: version || 'unknown',
     started_at: new Date().toISOString(),
     last_ping: new Date().toISOString()
   });
 
   const activeVersion = db.scriptVersions.find(v => v.active) || db.scriptVersions[db.scriptVersions.length - 1];
-  trackEvent('success', { ip, key: license_key, hwid });
+  trackEvent('success', { ip, key: license_key });
 
   return res.json({
     success: true,
