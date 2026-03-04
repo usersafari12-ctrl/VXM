@@ -379,7 +379,6 @@ app.patch('/admin/versions/:version/activate', adminLimiter, requireAdmin, (req,
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-// ─── Clean up stale sessions every 10 minutes ────────────────────────────────
 setInterval(() => {
   const cutoff = Date.now() - 30 * 60 * 1000; // 30 min inactive
   for (const [id, session] of db.sessions.entries()) {
@@ -391,3 +390,5 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🔐 License server running on port ${PORT}`));
+const path = require('path');
+app.use('/admin-ui', express.static(path.join(__dirname, 'public')));
